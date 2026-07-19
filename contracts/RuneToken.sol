@@ -4,15 +4,17 @@ pragma solidity ^0.8.24;
 import {ERC20} from "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.2/contracts/token/ERC20/ERC20.sol";
 import {ERC20Pausable} from "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.2/contracts/token/ERC20/extensions/ERC20Pausable.sol";
 import {ERC20Permit} from "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.2/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import {ERC20Votes} from "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.2/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import {Nonces} from "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.2/contracts/utils/Nonces.sol";
 import {AccessControl} from "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v5.0.2/contracts/access/AccessControl.sol";
 import {IRuneToken} from "./IRuneToken.sol";
 import {RuneErrors} from "./RuneErrors.sol";
 
 /**
  * @title RuneToken
- * @dev Core ERC20 token for the Tarnished ecosystem implementing RBAC, Pausable, and Blacklist.
+ * @dev Core ERC20 token for the Tarnished ecosystem implementing RBAC, Pausable, Blacklist, and Governance Voting.
  */
-contract RuneToken is ERC20, ERC20Pausable, ERC20Permit, AccessControl, IRuneToken {
+contract RuneToken is ERC20, ERC20Pausable, ERC20Permit, ERC20Votes, AccessControl, IRuneToken {
     
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
@@ -22,7 +24,11 @@ contract RuneToken is ERC20, ERC20Pausable, ERC20Permit, AccessControl, IRuneTok
 
     mapping(address => bool) private _blacklist;
 
-    constructor(address initialAdmin) ERC20("Rune", "RUNE") ERC20Permit("Rune") {
+    constructor(address initialAdmin) 
+        ERC20("Rune", "RUNE") 
+        ERC20Permit("Rune") 
+        AccessControl() 
+    {
         if (initialAdmin == address(0)) revert RuneErrors.Rune__ZeroAddressProvided();
         
         _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
@@ -30,6 +36,21 @@ contract RuneToken is ERC20, ERC20Pausable, ERC20Permit, AccessControl, IRuneTok
         _grantRole(PAUSER_ROLE, initialAdmin);
         _grantRole(BLACKLIST_MANAGER_ROLE, initialAdmin);
     }
+
+    // The following functions are overrides required by Solidity for Governance and Permitting
+
+    function _update(address from, address to, uint256 value) internal override(ERC20, ERC20Pausable, ERC20Votes) {
+        if (_blacklist[from]) revert RuneErrors.Rune__BlacklistedAccount(from);
+        if (_blacklist[to]) revert RuneErrors.Rune__BlacklistedAccount(to);
+        
+        super._update(from, to, value);
+    }
+
+    function nonces(address owner) public view override(ERC20Permit, Nonces) returns (uint256) {
+        return super.nonces(owner);
+    }
+
+    // --- Standard Token Functions ---
 
     function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
         if (totalSupply() + amount > MAX_SUPPLY) {
@@ -68,16 +89,5 @@ contract RuneToken is ERC20, ERC20Pausable, ERC20Permit, AccessControl, IRuneTok
 
     function isBlacklisted(address account) external view returns (bool) {
         return _blacklist[account];
-    }
-
-    function _update(
-        address from, 
-        address to, 
-        uint256 value
-    ) internal override(ERC20, ERC20Pausable) {
-        if (_blacklist[from]) revert RuneErrors.Rune__BlacklistedAccount(from);
-        if (_blacklist[to]) revert RuneErrors.Rune__BlacklistedAccount(to);
-        
-        super._update(from, to, value);
     }
 }
